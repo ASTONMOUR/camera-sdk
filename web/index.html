@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Product Capture — Select Package Shape</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="shell">
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    Product Capture
+  </div>
+  <div class="pill" id="backend">checking…</div>
+</header>
+
+<main class="pick">
+  <h1>What shape is the package?</h1>
+  <p class="sub">
+    The shape decides how many photographs are needed and what you will be asked
+    to do between them.
+  </p>
+
+  <div class="cards">
+    <button class="card" data-shape="flat">
+      <svg viewBox="0 0 120 90" aria-hidden="true">
+        <rect x="26" y="12" width="68" height="66" rx="5" />
+        <path d="M26 26h68" />
+      </svg>
+      <h2>Flat</h2>
+      <p>Pouch, carton, wrapper, sachet</p>
+      <span class="steps">2 photographs — front and back</span>
+    </button>
+
+    <button class="card" data-shape="cylindrical">
+      <svg viewBox="0 0 120 90" aria-hidden="true">
+        <ellipse cx="60" cy="20" rx="26" ry="9" />
+        <path d="M34 20v50" />
+        <path d="M86 20v50" />
+        <ellipse cx="60" cy="70" rx="26" ry="9" />
+      </svg>
+      <h2>Cylindrical</h2>
+      <p>Bottle, can, jar, tin</p>
+      <span class="steps">6 photographs — around the pack, then lid and base</span>
+    </button>
+  </div>
+
+  <p class="hint">
+    The camera captures on its own. Hold the pack inside the guide and stay still
+    for a second — there is no shutter button.
+  </p>
+</main>
+
+<script type="module">
+  import { SERVER } from "/static/core/constants.js";
+
+  for (const card of document.querySelectorAll(".card")) {
+    card.addEventListener("click", () => {
+      window.location.href = `/capture.html?shape=${card.dataset.shape}`;
+    });
+  }
+
+  // Show which OCR backend is live, so nobody is surprised by an offline result.
+  fetch(`${SERVER.origin}/api/health`)
+    .then((r) => r.json())
+    .then((h) => {
+      const el = document.getElementById("backend");
+      el.textContent = `OCR: ${h.ocr_backend} · ${h.compliance_rules} rules`;
+      el.classList.toggle("warn", h.ocr_backend === "offline");
+    })
+    .catch(() => {
+      document.getElementById("backend").textContent = "server unreachable";
+    });
+</script>
+</body>
+</html>

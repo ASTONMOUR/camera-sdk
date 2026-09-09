@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    @apply bg-bg text-ink antialiased;
+    height: 100%;
+  }
+
+  body {
+    font-feature-settings: "cv02", "cv03";
+  }
+}
+
+@layer components {
+  /* The viewport fills what is left after the chrome, and the video and the
+     overlay canvas stack exactly on top of each other. */
+  .video-layer {
+    @apply absolute inset-0 h-full w-full;
+  }
+}

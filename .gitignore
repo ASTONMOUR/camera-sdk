@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.sessions/
+.venv/
+node_modules/
+.DS_Store
+.dist/
+
+# Next.js / Capacitor
+app/.next/
+app/out/
+app/.env.local
+app/ios/
+app/android/

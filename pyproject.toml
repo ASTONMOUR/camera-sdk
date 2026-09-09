@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "productcapture"
+version = "1.0.0"
+description = "AI-guided product capture SDK: KYC-style camera flow for packaged-food label compliance"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pydantic>=2.6",
+    "opencv-python>=4.9",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+# The primary OCR backend. Without it the service falls back to the LabelCheck
+# Gemini adapter, and without that to a deterministic offline path.
+ocr = ["paddleocr>=2.7", "paddlepaddle>=2.6"]
+# Only needed to run a YOLO11 .onnx model server-side; the detector is
+# model-free by default.
+yolo = ["onnxruntime>=1.17"]
+dev = ["pytest>=7.4", "httpx>=0.27", "ruff>=0.3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

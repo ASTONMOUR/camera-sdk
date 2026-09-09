@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Product Capture</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="shell">
+
+<header class="topbar">
+  <a class="brand" href="/index.html">
+    <span class="dot"></span>
+    Product Capture
+  </a>
+  <div class="pill" id="stats">—</div>
+</header>
+
+<!-- Capture stage ------------------------------------------------------- -->
+<main class="stage" id="stage">
+  <div class="viewport">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+    <div class="steps-rail" id="rail"></div>
+  </div>
+
+  <div class="tray">
+    <div class="tray-label" id="stepLabel">Front of pack</div>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="actions">
+      <button class="ghost" id="flip">Flip camera</button>
+      <button class="ghost" id="manual">Capture now</button>
+    </div>
+  </div>
+</main>
+
+<!-- Between-surface interstitial ----------------------------------------- -->
+<div class="sheet hidden" id="between">
+  <div class="sheet-card">
+    <div class="tick">✓</div>
+    <h2 id="betweenTitle">Captured</h2>
+    <p id="betweenText">Rotate the pack 90° and continue.</p>
+    <button class="primary" id="betweenGo">Continue</button>
+  </div>
+</div>
+
+<!-- Report --------------------------------------------------------------- -->
+<section class="report hidden" id="report">
+  <div class="report-head">
+    <span class="verdict" id="verdict">…</span>
+    <h1>Compliance report</h1>
+    <p class="sub" id="reportSub"></p>
+  </div>
+  <div class="report-body">
+    <div class="panel">
+      <h3>Declared fields</h3>
+      <table id="fields"><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <h3>Rule verdicts</h3>
+      <div id="verdicts"></div>
+    </div>
+  </div>
+  <div class="report-actions">
+    <button class="ghost" onclick="location.href='/index.html'">Start over</button>
+  </div>
+</section>
+
+<div class="toast hidden" id="toast"></div>
+
+<script type="module">
+  import { createPipeline } from "/static/core/pipeline.js";
+  import { SLOT_LABEL } from "/static/core/constants.js";
+
+  const params = new URLSearchParams(location.search);
+  const shape = params.get("shape") === "cylindrical" ? "cylindrical" : "flat";
+
+  const $ = (id) => document.getElementById(id);
+  const toast = (msg, ms = 2600) => {
+    const el = $("toast");
+    el.textContent = msg;
+    el.classList.remove("hidden");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.add("hidden"), ms);
+  };
+
+  const pipeline = createPipeline({
+    video: $("video"),
+    canvas: $("overlay"),
+    shape,
+    handlers: {
+      session(res) {
+        renderRail(res.plan.steps, 0);
+        if (res.ocr_backend === "offline") {
+          toast("OCR backend is offline — fields will come back blank.", 5000);
+        }
+      },
+      step(slot) {
+        $("stepLabel").textContent = SLOT_LABEL[slot] || slot;
+        renderRail(pipeline.plan.steps, pipeline.plan.steps.indexOf(slot));
+      },
+      captured(item) {
+        const img = document.createElement("img");
+        img.src = item.preview;
+        img.title = `${SLOT_LABEL[item.slot] || item.slot} — tap to retake`;
+        img.addEventListener("click", () => {
+          img.remove();
+          pipeline.retake(item.slot);
+        });
+        $("thumbs").append(img);
+      },
+      between(text) {
+        $("betweenTitle").textContent = "Captured";
+        $("betweenText").textContent = text;
+        $("between").classList.remove("hidden");
+      },
+      async complete() {
+        $("betweenTitle").textContent = "All surfaces captured";
+        $("betweenText").textContent = "Reading the label and checking it against the rules…";
+        $("betweenGo").classList.add("hidden");
+        $("between").classList.remove("hidden");
+        try {
+          renderReport(await pipeline.compliance());
+        } catch (err) {
+          $("betweenText").textContent = String(err.message || err);
+        }
+      },
+      stats(s) {
+        $("stats").textContent =
+          `${s.fps} fps · ${s.latency_p50}ms · step ${s.step}/${s.total}`;
+      },
+      error(err) {
+        toast(String(err.message || err), 5000);
+      },
+    },
+  });
+
+  $("flip").addEventListener("click", () => pipeline.flip());
+  $("manual").addEventListener("click", () => pipeline.forceCapture());
+  $("betweenGo").addEventListener("click", () => $("between").classList.add("hidden"));
+
+  pipeline.start().catch((err) => {
+    toast(`Camera unavailable: ${err.message}. HTTPS or localhost is required.`, 8000);
+  });
+
+  function renderRail(steps, activeIndex) {
+    $("rail").innerHTML = "";
+    steps.forEach((slot, i) => {
+      const el = document.createElement("span");
+      el.className = "rail-dot" + (i < activeIndex ? " done" : i === activeIndex ? " active" : "");
+      el.title = SLOT_LABEL[slot] || slot;
+      $("rail").append(el);
+    });
+  }
+
+  function renderReport(report) {
+    $("between").classList.add("hidden");
+    $("stage").classList.add("hidden");
+    $("report").classList.remove("hidden");
+    pipeline.stop();
+
+    const v = $("verdict");
+    v.textContent = report.worst;
+    v.className = `verdict v-${report.worst.toLowerCase()}`;
+
+    const counts = Object.entries(report.summary)
+      .filter(([, n]) => n > 0)
+      .map(([k, n]) => `${n} ${k.toLowerCase()}`)
+      .join(" · ");
+    $("reportSub").textContent =
+      `${report.surfaces_captured.length} surfaces · OCR ${report.ocr_backend} · ${counts}`;
+
+    const body = $("fields").querySelector("tbody");
+    body.innerHTML = "";
+    for (const [name, field] of Object.entries(report.fields)) {
+      const tr = document.createElement("tr");
+      const pretty = name.replace(/_/g, " ");
+      tr.innerHTML =
+        `<td>${pretty}</td>` +
+        `<td class="${field.value ? "" : "missing"}">${field.value ?? "— not found —"}</td>` +
+        `<td class="conf">${field.value ? Math.round(field.confidence * 100) + "%" : ""}</td>`;
+      body.append(tr);
+    }
+
+    const list = $("verdicts");
+    list.innerHTML = "";
+    for (const verdict of report.verdicts) {
+      const row = document.createElement("div");
+      row.className = `vrow v-${String(verdict.state).toLowerCase()}`;
+      row.innerHTML =
+        `<span class="vstate">${verdict.state}</span>` +
+        `<span class="vrule">${verdict.rule_id || verdict.rule || ""}</span>` +
+        `<span class="vwhy">${verdict.reason || verdict.message || ""}</span>`;
+      list.append(row);
+    }
+  }
+</script>
+</body>
+</html>
