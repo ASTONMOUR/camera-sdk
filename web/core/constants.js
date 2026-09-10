@@ -12,6 +12,26 @@ export const MAX_PACKET_AREA_FRACTION = 0.92;
 export const CENTER_BAND_FRACTION = 0.30;  // box center may sit this far from frame center
 export const MAX_PERSPECTIVE_RATIO = 1.35; // longest edge / shortest edge of the quad
 export const DETECT_CONFIDENCE_MIN = 0.35;
+
+// Rectangularity gate. Edge-energy concentration alone cannot tell a pack from a
+// person — a face and torso are a dense pile of edges and score just as high,
+// which is what made the camera fire at people standing in frame. A packet has
+// one property a person does not: it is bounded by straight, perpendicular
+// edges, and its printed text runs along those same axes. PACKET_ALIGNMENT_MIN
+// is the fraction of in-box edge energy that must share one orientation (folded
+// so perpendicular edges count together) for the region to be a pack at all.
+//
+// CALIBRATION KNOB, and the only threshold here not yet validated against a
+// real camera. On the synthetic frames in selfcheck.mjs a striped rectangle
+// scores 0.97 and a person-shaped blob 0.41; a uniform spread would give ~0.28.
+// Real optics sit lower than synthetic ones — expect a pack around 0.60-0.85
+// and a person around 0.25-0.45. Read the live value off the "rect" figure in
+// the stats pill: raise this if people still trigger a capture, lower it if a
+// real pack will not detect.
+export const PACKET_ALIGNMENT_MIN = 0.55;
+export const ALIGNMENT_TOLERANCE_DEG = 12;  // half-width of the orientation window
+export const ALIGNMENT_MIN_GRADIENT = 30;   // ignore near-flat pixels as noise
+
 export const STABLE_FRAMES = 25;           // frames the packet must stay "ready" to fire
 export const EXPECTED_FPS = 25;
 

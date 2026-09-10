@@ -29,6 +29,16 @@ import numpy as np
 # The minimum strength of a detected contour to be treated as the packet.
 MIN_CONTOUR_AREA_FRACTION: float = 0.05
 
+# A contour must fill this much of its own minimum-area rectangle to count as a pack.
+# The browser's rectangularity gate has a twin here for the same reason: the largest
+# central contour in a frame containing a person IS the person, and nothing above
+# measured area alone would say otherwise. A rectangle fills its min-area rect almost
+# completely; a human silhouette leaves the corners empty.
+#
+# ponytail: extent, not a model — it reuses the minAreaRect already being computed. It
+# rejects people and hands; a book or a box still passes. That is the YOLO11 seam.
+MIN_RECT_EXTENT: float = 0.72
+
 # The detector intentionally ignores the central guide band's own border, so a frame
 # with no packet does not "detect" the overlay rectangle. Contours whose bounding box is
 # this close to the frame edge are the overlay or a hand, not the pack.
@@ -86,11 +96,11 @@ def detect_packet(image: np.ndarray) -> dict:
 def _heuristic_detect(grey: np.ndarray) -> tuple[list[float], float, float, np.ndarray | None]:
     """Return [box, confidence, angle, quad] for the best packet-like contour.
 
-    The heuristic leans on three signals the framing overlay guarantees: the pack is a
-    large, roughly rectangular blob on a background that is either plain or out of
-    focus; it sits in the center; and its edges are the strongest in the frame after
-    blur suppression. It first takes the largest contour near the center, then checks
-    the centre of its top edge for an aspect-ratio-consistent, high-fill rectangle.
+    The heuristic leans on four signals the framing overlay guarantees: the pack is a
+    large blob on a background that is either plain or out of focus; it sits in the
+    center; its edges are the strongest in the frame after blur suppression; and it is
+    genuinely *rectangular*, which is what separates a pack from a person (see
+    MIN_RECT_EXTENT).
     """
     height, width = grey.shape
     # Gaussian blur suppresses specular noise before Canny.
@@ -117,11 +127,21 @@ def _heuristic_detect(grey: np.ndarray) -> tuple[list[float], float, float, np.n
         if (cx - center_point[0]) ** 2 + (cy - center_point[1]) ** 2 > (frame_area * 0.25):
             continue
         rect_area = area / frame_area
-        if rect_area > best[0]:
-            quad = cv2.approxPolyDP(contour, 0.02 * cv2.arcLength(contour, True), True)
-            angle, _rot_rect = _orientation(cv2.minAreaRect(contour))
-            best = (rect_area, [float(x), float(y), float(w), float(h)], angle,
-                    quad if len(quad) == 4 else None)
+        if rect_area <= best[0]:
+            continue
+        # Rectangular, or merely large? A person is the largest central contour in a
+        # frame with no product in it, and passes every test above.
+        min_rect = cv2.minAreaRect(contour)
+        (_rw, _rh) = min_rect[1]
+        rotated_area = float(_rw) * float(_rh)
+        if rotated_area <= 0:
+            continue
+        if cv2.contourArea(contour) / rotated_area < MIN_RECT_EXTENT:
+            continue
+        quad = cv2.approxPolyDP(contour, 0.02 * cv2.arcLength(contour, True), True)
+        angle, _rot_rect = _orientation(min_rect)
+        best = (rect_area, [float(x), float(y), float(w), float(h)], angle,
+                quad if len(quad) == 4 else None)
 
     if best[1]:
         return [best[1], min(1.0, best[0] * 3.0), best[2], best[3]]

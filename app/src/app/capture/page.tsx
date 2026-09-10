@@ -41,7 +41,7 @@ function CaptureScreen() {
       <TopBar
         stats={
           !covered && state.stats
-            ? `${state.stats.fps} fps · ${state.stats.latency_p50}ms · step ${state.stats.step}/${state.stats.total}`
+            ? `${state.stats.fps} fps · ${state.stats.latency_p50}ms · rect ${state.stats.alignment.toFixed(2)} · step ${state.stats.step}/${state.stats.total}`
             : undefined
         }
       />

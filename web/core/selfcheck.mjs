@@ -11,7 +11,7 @@ import { assessQuality } from "./quality.js";
 import { guidanceFor, arrowFor } from "./guidance.js";
 import { createAutomaton, STATE } from "./automaton.js";
 import { buildPlan, surfacesForShape, nextMissingSlotIndex } from "./plan.js";
-import { GUIDE, BORDER, STABLE_FRAMES } from "./constants.js";
+import { GUIDE, BORDER, STABLE_FRAMES, PACKET_ALIGNMENT_MIN } from "./constants.js";
 
 let checks = 0;
 const check = (name, fn) => {
@@ -84,6 +84,74 @@ check("an empty frame yields no detection", () => {
 check("a level pack reads as roughly level", () => {
   const { detection } = analyse({});
   assert.ok(detection.angle >= 0 && detection.angle <= 45, `angle ${detection.angle} out of range`);
+});
+
+// A person is the false positive that actually bit: edge energy alone scores a
+// face and torso as high as a pack, and the shutter fired at people standing in
+// frame. Concentric rings inside an ellipse reproduce the property that matters
+// — gradients point radially, so orientations spread across every bin instead of
+// collapsing onto one like a rectangle's do.
+function makeBlobFrame({ width = 640, height = 480, bright = 200 } = {}) {
+  const rgba = new Uint8ClampedArray(width * height * 4).fill(0);
+  for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255;
+  const cx = width / 2;
+  const cy = height / 2;
+  const rx = width * 0.34;
+  const ry = height * 0.42;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const nx = (x - cx) / rx;
+      const ny = (y - cy) / ry;
+      if (nx * nx + ny * ny > 1) continue;
+      const r = Math.hypot(x - cx, y - cy);
+      const v = Math.floor(r / 4) % 2 === 0 ? bright : Math.max(0, bright - 90);
+      const p = (y * width + x) * 4;
+      rgba[p] = v;
+      rgba[p + 1] = v;
+      rgba[p + 2] = v;
+    }
+  }
+  return { rgba, width, height };
+}
+
+const analyseBlob = () => {
+  const f = makeBlobFrame();
+  const { grey, w, h } = toWorkingGrey(f.rgba, f.width, f.height);
+  const detection = detectFrame(grey, w, h);
+  const quality = assessQuality({ grey, width: w, height: h }, null, detection, null);
+  return { detection, quality };
+};
+
+check("a rectangular pack is strongly axis-aligned", () => {
+  const { detection } = analyse({});
+  assert.ok(
+    detection.alignment >= PACKET_ALIGNMENT_MIN,
+    `pack alignment ${detection.alignment} below the gate ${PACKET_ALIGNMENT_MIN}`,
+  );
+});
+
+check("a person-shaped blob is not mistaken for a pack", () => {
+  const { detection, quality } = analyseBlob();
+  assert.ok(
+    detection.alignment < PACKET_ALIGNMENT_MIN,
+    `blob alignment ${detection.alignment} would pass the gate`,
+  );
+  assert.equal(detection.box.length, 0, "a blob must not produce a box");
+  assert.ok(!quality.packet_present, "a blob must not read as a packet");
+  assert.ok(!quality.ready, "a blob must never be capture-ready");
+});
+
+check("the blob would have passed on edge energy alone", () => {
+  // Guards the fix itself: if this stops holding, the blob is being rejected by
+  // something other than rectangularity and the gate is no longer under test.
+  const { quality } = analyseBlob();
+  assert.deepEqual(quality.reasons, [GUIDE.NO_PACKET]);
+});
+
+check("rectangularity separates pack from person by a clear margin", () => {
+  const pack = analyse({}).detection.alignment;
+  const blob = analyseBlob().detection.alignment;
+  assert.ok(pack - blob > 0.2, `margin too thin: pack ${pack} vs blob ${blob}`);
 });
 
 console.log("quality");

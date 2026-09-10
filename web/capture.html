@@ -139,8 +139,11 @@
         renderReview();
       },
       stats(s) {
+        // "rect" is the rectangularity score. It is here rather than in a debug
+        // build because the threshold below it needs calibrating against a real
+        // camera, and you cannot calibrate a number you cannot see.
         $("stats").textContent =
-          `${s.fps} fps · ${s.latency_p50}ms · step ${s.step}/${s.total}`;
+          `${s.fps} fps · ${s.latency_p50}ms · rect ${s.alignment.toFixed(2)} · step ${s.step}/${s.total}`;
       },
       error(err) {
         toast(String(err.message || err), 5000);

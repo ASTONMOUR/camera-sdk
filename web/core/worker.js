@@ -48,6 +48,9 @@ self.onmessage = (event) => {
     box: detection.box,
     center: detection.center,
     confidence: detection.confidence,
+    // Rectangularity. Exposed so the threshold can be calibrated by reading the
+    // live number off a real device rather than guessed at.
+    alignment: detection.alignment,
     angle: detection.angle,
     area: detection.area,
     aspect_ratio: detection.aspect_ratio,

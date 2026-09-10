@@ -14,3 +14,4 @@ app/out/
 app/.env.local
 app/ios/
 app/android/
+app/tsconfig.tsbuildinfo

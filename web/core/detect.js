@@ -11,6 +11,16 @@
 // Tilt comes from the structure tensor's dominant gradient orientation, which
 // is the standard cheap way to recover "how rotated is this rectangle" — for a
 // level pack, edges concentrate at 0° and 90°, so deviation from that is tilt.
+//
+// Edge energy alone cannot tell a pack from a person: a face and torso carry
+// plenty of it and used to auto-fire the shutter. So a detection must also be
+// *rectangular* — see axisAlignment.
+
+import {
+  PACKET_ALIGNMENT_MIN,
+  ALIGNMENT_TOLERANCE_DEG,
+  ALIGNMENT_MIN_GRADIENT,
+} from "./constants.js";
 
 // Fraction of peak row/column energy that still counts as "inside the pack".
 const BAND_THRESHOLD = 0.35;
@@ -42,6 +52,12 @@ export function detectFrame(grey, w, h) {
   const areaFraction = (bw * bh) / (w * h);
   if (areaFraction < MIN_AREA_FRACTION) return empty();
 
+  // Is this thing actually rectangular? A person passes every energy-based test
+  // and fails this one. Checked before anything else is computed so a face never
+  // reaches the quality gates or draws a box.
+  const alignment = axisAlignment(gx, gy, w, h, xs, ys);
+  if (alignment < PACKET_ALIGNMENT_MIN) return empty(alignment);
+
   const angle = dominantTilt(gx, gy, w, h, xs, ys);
 
   // Confidence: how much of the total edge energy falls inside the box. A real
@@ -54,6 +70,7 @@ export function detectFrame(grey, w, h) {
     box: [xs[0], ys[0], bw, bh],
     center: [xs[0] + bw / 2, ys[0] + bh / 2],
     confidence: round(confidence, 3),
+    alignment: round(alignment, 3),
     angle: round(angle, 1),
     area: round(areaFraction, 4),
     aspect_ratio: round(bw / Math.max(1, bh), 3),
@@ -161,11 +178,62 @@ function energyConcentration(gx, gy, w, h, xs, ys) {
   return total > 0 ? inside / total : 0;
 }
 
-function empty() {
+// How rectangular is the detected region?
+//
+// Returns the fraction of in-box edge energy sharing a single orientation, with
+// gradient direction folded into 0..90°. The fold is the trick: a rectangle's
+// two edge families are perpendicular, and perpendicular directions collapse
+// onto the same bin once folded — so a rectangle dumps nearly all its energy
+// into one narrow window no matter how the pack is rotated. Printed label text
+// runs along those same axes and reinforces it.
+//
+// A person has no such structure. Face, hair, shoulders and clothing folds are
+// curved, so their orientations spread across every bin and the best window
+// captures little more than the ~0.28 a uniform spread would give.
+//
+// ponytail: an orientation histogram, not a model. It rejects people and hands
+// reliably; it will still accept a book, a box, or a picture frame. If that
+// matters, this is the seam where the YOLO11 path already planned in vision.py
+// should take over.
+function axisAlignment(gx, gy, w, h, xs, ys) {
+  const BINS = 90; // one per degree
+  const hist = new Float32Array(BINS);
+  let total = 0;
+
+  for (let y = ys[0]; y <= ys[1]; y += 1) {
+    for (let x = xs[0]; x <= xs[1]; x += 1) {
+      const i = y * w + x;
+      const mag = Math.abs(gx[i]) + Math.abs(gy[i]);
+      // Flat regions have a meaningless gradient direction; including them would
+      // just add uniform noise to every bin and drag the score toward chance.
+      if (mag < ALIGNMENT_MIN_GRADIENT) continue;
+      const deg = Math.atan2(gy[i], gx[i]) * (180 / Math.PI);
+      const folded = ((deg % 90) + 90) % 90;
+      hist[Math.min(BINS - 1, Math.floor(folded))] += mag;
+      total += mag;
+    }
+  }
+  if (total <= 0) return 0;
+
+  // Best circular window of ±tolerance. Circular because 89° and 0° are one
+  // degree apart in folded space, not eighty-nine.
+  let best = 0;
+  for (let c = 0; c < BINS; c += 1) {
+    let sum = 0;
+    for (let d = -ALIGNMENT_TOLERANCE_DEG; d <= ALIGNMENT_TOLERANCE_DEG; d += 1) {
+      sum += hist[(c + d + BINS) % BINS];
+    }
+    if (sum > best) best = sum;
+  }
+  return best / total;
+}
+
+function empty(alignment = 0) {
   return {
     box: [],
     center: [],
     confidence: 0,
+    alignment: round(alignment, 3),
     angle: 0,
     area: 0,
     aspect_ratio: 0,

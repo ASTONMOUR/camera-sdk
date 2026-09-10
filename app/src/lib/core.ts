@@ -37,6 +37,8 @@ export interface Analysis {
   box: number[];
   center: number[];
   confidence: number;
+  /** Rectangularity, 0..1. Below PACKET_ALIGNMENT_MIN there is no detection. */
+  alignment: number;
   angle: number;
   area: number;
   aspect_ratio: number;
@@ -59,6 +61,7 @@ export interface Stats {
   fps: number;
   latency_p50: number;
   latency_p95: number;
+  alignment: number;
   step: number;
   total: number;
 }

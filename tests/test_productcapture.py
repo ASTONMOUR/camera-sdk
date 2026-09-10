@@ -119,6 +119,29 @@ class TestDetectPacket:
         assert 0 <= x < w and 0 <= y < h
         assert bw > 0 and bh > 0
 
+    def test_a_person_is_not_a_packet(self):
+        """A head-and-shoulders silhouette is large, central, and not a pack.
+
+        This is the false positive that shipped: the browser fired the shutter at
+        people standing in frame, because "biggest central blob" describes a person
+        perfectly. The server detector had the same hole.
+        """
+        image = np.full((600, 800, 3), 220, np.uint8)
+        cv2.ellipse(image, (400, 230), (90, 120), 0, 0, 360, (60, 70, 90), -1)   # head
+        cv2.ellipse(image, (400, 560), (210, 220), 0, 180, 360, (60, 70, 90), -1)  # shoulders
+        assert detect_packet(image)["box"] == []
+
+        # And prove it is the extent gate rejecting it, not some incidental filter —
+        # otherwise this test would keep passing after the gate was removed.
+        import productcapture.vision as vision
+
+        original = vision.MIN_RECT_EXTENT
+        try:
+            vision.MIN_RECT_EXTENT = 0.0
+            assert detect_packet(image)["box"] != []
+        finally:
+            vision.MIN_RECT_EXTENT = original
+
 
 # --------------------------------------------------------------------------- quality
 

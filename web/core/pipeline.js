@@ -210,6 +210,10 @@ export function createPipeline({ video, canvas, shape, apiBase = SERVER.origin, 
       fps: fps.value,
       latency_p50: sorted.length ? sorted[Math.floor(sorted.length * 0.5)] : 0,
       latency_p95: sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0,
+      // Live rectangularity, so PACKET_ALIGNMENT_MIN can be calibrated by
+      // pointing a real camera at a real pack and reading the number, rather
+      // than by guessing and waiting for a false capture to prove it wrong.
+      alignment: lastAnalysis.alignment ?? 0,
       step: stepIndex + 1,
       total: plan.steps.length,
     };

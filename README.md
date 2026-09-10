@@ -34,7 +34,7 @@ non-compliant" are different answers and the report keeps them apart.
 ```bash
 ./run.sh serve     # API + capture UI on http://localhost:8000
 ./run.sh test      # Python suite (23 tests)
-./run.sh check     # browser core self-check (20 checks, needs node)
+./run.sh check     # browser core self-check (27 checks, needs node)
 ./run.sh all       # both
 ```
 
@@ -131,7 +131,7 @@ web/                    zero-build SDK — plain ES modules, no bundler, no npm
   capture.html          the camera UI
   core/
     constants.js        every threshold, shared by worker and UI so they cannot disagree
-    detect.js           Sobel projection profile + structure-tensor tilt
+    detect.js           Sobel projection profile, rectangularity gate, structure-tensor tilt
     quality.js          JS twin of quality.py
     guidance.js         ranks reasons → one instruction + border colour
     automaton.js        the auto-capture hold
@@ -173,6 +173,24 @@ The detector and the quality gates share **one** 320px greyscale buffer. They
 used not to, and the box coordinates were being read against a different
 resolution than the pixels — every frame came back "blurry" for reasons nothing
 in the logs explained.
+
+### Why a pack must also be rectangular
+
+Edge energy alone cannot tell a pack from a person. A face and torso are a dense
+pile of edges and score just as high on concentration, so the camera fired at
+people standing in frame with no product in sight.
+
+So a detection must pass a second, independent test: the gradient directions
+inside the box are folded into 0–90° and scored on how much of the edge energy
+shares one orientation. The fold is the trick — a rectangle's two edge families
+are perpendicular, and perpendicular directions land in the *same* bin once
+folded, so a rectangle dumps nearly all its energy into one narrow window no
+matter how the pack is rotated. Printed label text runs along those same axes
+and reinforces it. A person is curved everywhere and spreads across every bin.
+
+The score is live in the stats pill as `rect`, because `PACKET_ALIGNMENT_MIN`
+is a threshold on the physical world and wants calibrating against a real
+camera, not guessing.
 
 ---
 
@@ -298,10 +316,11 @@ the full HTTP flow end to end including a real compliance run.
 
 `./run.sh check` covers the browser core, which the Python suite cannot reach:
 that detection finds a synthetic pack and returns coordinates inside the working
-buffer, that the gates complain correctly about distance and light, that
-guidance never names two directions at once, and that the automaton fires once
-after a full hold, resets on a bad frame, and does not double-fire while a
-capture is in flight.
+buffer, that a person-shaped blob is rejected *and* that it would have passed on
+edge energy alone (so the rectangularity gate stays the thing under test), that
+the gates complain correctly about distance and light, that guidance never names
+two directions at once, and that the automaton fires once after a full hold,
+resets on a bad frame, and does not double-fire while a capture is in flight.
 
 ---
 
@@ -313,6 +332,11 @@ Marked `ponytail:` in the source where they bite.
   concurrent captures; go per-session if throughput matters.
 - **Detection assumes one dominant pack.** Two packs in frame read as one wide
   box; `multiple_packets` catches the obvious case, a model catches the rest.
+- **The rectangularity gate is a histogram, not a model.** It rejects people and
+  hands reliably; it will still accept a book, a laptop, a box or a picture
+  frame. That is the seam where the YOLO11 path takes over.
+  `PACKET_ALIGNMENT_MIN` has been tuned against synthetic frames only — check
+  the `rect` figure on a real device before trusting it.
 - **Distance is an estimate from apparent area**, calibrated so a pack filling
   ~45% of frame reads ~20cm. The UI labels it approximate. Real depth needs
   camera intrinsics or a reference object.
