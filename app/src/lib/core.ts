@@ -5,11 +5,8 @@
 // untyped, so the shapes are declared once, here, and everything in the React
 // tree imports from this file rather than reaching into the core directly.
 
-// @ts-expect-error — plain JS module, typed by the declarations below.
 import { createPipeline as createPipelineJs } from "@core/pipeline.js";
-// @ts-expect-error — plain JS module.
 import { SURFACE_SEQUENCES, SLOT_LABEL, GUIDE, BORDER, STABLE_FRAMES } from "@core/constants.js";
-// @ts-expect-error — plain JS module.
 import { buildPlan as buildPlanJs } from "@core/plan.js";
 
 export type PackShape = "flat" | "cylindrical";
@@ -115,9 +112,13 @@ export interface PipelineHandlers {
 export interface Pipeline {
   start(): Promise<{ width: number; height: number; facingMode: string }>;
   stop(): Promise<void>;
+  /** Halt analysis, keep the stream. */
+  pause(): void;
+  resume(): void;
   compliance(): Promise<ComplianceReport>;
   forceCapture(): Promise<void>;
-  retake(slot: Slot): void;
+  /** False when the retake was refused — currently only mid-upload. */
+  retake(slot: Slot): boolean;
   flip(): Promise<unknown>;
   stats(): Stats;
   plan: Plan;

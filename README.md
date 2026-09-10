@@ -186,13 +186,14 @@ wrap into an iOS or Android binary.
 cd app
 npm install
 npm run dev            # http://localhost:3000, expects ./run.sh serve on :8000
+npm run typecheck && npm run build
 ```
 
-**Not yet built here.** `npm install` was blocked in the environment this was
-written in (no registry access), so `app/` has never been installed,
-type-checked, or built. The Python suite and the browser core self-check are
-green; the React tree is unverified. Run `npm run typecheck && npm run build`
-first — treat the first run as a bring-up, not a regression.
+`npm run build` is clean: three static routes, ~101kB first load. The Worker
+survives the bundler — webpack rewrites `new Worker(new URL("./worker.js", …))`
+into its own chunk with the whole `web/core` dependency graph inlined, and drops
+`type: "module"` because it no longer needs ESM. That is the good outcome: a
+classic worker runs on Firefox before 114, a module worker does not.
 
 ### Pointing it at the API
 
@@ -243,6 +244,25 @@ over a second.
 
 Auto-capture requires all of: packet present, correct size, centred, sharp,
 correctly exposed, no glare, and stable — continuously, for 25 frames.
+
+### Review before submit
+
+Every shot is shown full-size the moment it is taken, with **Retake this one**
+beside **Looks good**. When the last slot lands, the session stops at a review
+grid of all the photographs and waits for **Submit for compliance**.
+
+Compliance does not run on its own. The entire report is derived from these
+images, and a blurred back-of-pack yields a confident `FAIL` that is really an
+OCR miss — the most expensive kind of wrong answer this system can give. One
+look at the photograph costs a second; unpicking that verdict costs far more.
+
+The capture cursor is derived from which slots have photographs, not
+incremented — so a retake re-shoots exactly one surface and returns to the
+review, rather than marching forward through slots that are already done.
+
+Analysis pauses while the review is open and resumes on retake. The stream
+itself stays live: dropping it would re-prompt for camera permission, and on
+iOS that prompt cannot be re-answered without a user gesture.
 
 ### Guidance
 

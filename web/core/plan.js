@@ -32,3 +32,14 @@ function betweenInstructions(shape, steps) {
   }
   return ["Turn the pack over to photograph the back."];
 }
+
+/**
+ * Index of the first step with no photograph yet, or -1 when all are captured.
+ *
+ * The capture cursor is derived from this rather than incremented, because a
+ * retake moves backwards: bumping by one after re-shooting slot 0 would march
+ * forward re-shooting every slot after it that is already done.
+ */
+export function nextMissingSlotIndex(steps, captured) {
+  return steps.findIndex((slot) => !captured.some((c) => c.slot === slot));
+}

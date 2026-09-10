@@ -37,12 +37,27 @@
 <!-- Between-surface interstitial ----------------------------------------- -->
 <div class="sheet hidden" id="between">
   <div class="sheet-card">
-    <div class="tick">✓</div>
+    <img class="sheet-shot" id="betweenShot" alt="The photograph just taken" />
     <h2 id="betweenTitle">Captured</h2>
     <p id="betweenText">Rotate the pack 90° and continue.</p>
-    <button class="primary" id="betweenGo">Continue</button>
+    <div class="sheet-actions">
+      <button class="ghost" id="betweenRetake">Retake this one</button>
+      <button class="primary" id="betweenGo">Looks good</button>
+    </div>
   </div>
 </div>
+
+<!-- Review before submit --------------------------------------------------- -->
+<section class="review hidden" id="review">
+  <div class="report-head">
+    <h1>Check your photographs</h1>
+    <p class="sub" id="reviewSub"></p>
+  </div>
+  <div class="review-grid" id="reviewGrid"></div>
+  <div class="report-actions">
+    <button class="primary" id="submit">Submit for compliance</button>
+  </div>
+</section>
 
 <!-- Report --------------------------------------------------------------- -->
 <section class="report hidden" id="report">
@@ -84,6 +99,9 @@
     toast._t = setTimeout(() => el.classList.add("hidden"), ms);
   };
 
+  // The photograph most recently stored, so the interstitial can show it.
+  let lastShot = null;
+
   const pipeline = createPipeline({
     video: $("video"),
     canvas: $("overlay"),
@@ -100,30 +118,25 @@
         renderRail(pipeline.plan.steps, pipeline.plan.steps.indexOf(slot));
       },
       captured(item) {
-        const img = document.createElement("img");
-        img.src = item.preview;
-        img.title = `${SLOT_LABEL[item.slot] || item.slot} — tap to retake`;
-        img.addEventListener("click", () => {
-          img.remove();
-          pipeline.retake(item.slot);
-        });
-        $("thumbs").append(img);
+        lastShot = item;
+        renderThumbs();
       },
       between(text) {
-        $("betweenTitle").textContent = "Captured";
+        $("betweenTitle").textContent = lastShot
+          ? `${SLOT_LABEL[lastShot.slot] || lastShot.slot} captured`
+          : "Captured";
         $("betweenText").textContent = text;
+        $("betweenShot").src = lastShot ? lastShot.preview : "";
         $("between").classList.remove("hidden");
       },
-      async complete() {
-        $("betweenTitle").textContent = "All surfaces captured";
-        $("betweenText").textContent = "Reading the label and checking it against the rules…";
-        $("betweenGo").classList.add("hidden");
-        $("between").classList.remove("hidden");
-        try {
-          renderReport(await pipeline.compliance());
-        } catch (err) {
-          $("betweenText").textContent = String(err.message || err);
-        }
+      complete() {
+        // Compliance is not run here. The photographs are what the whole report
+        // is derived from, so they get looked at by a human first — a blurred
+        // back-of-pack produces a confident FAIL that is really an OCR miss.
+        $("between").classList.add("hidden");
+        $("stage").classList.add("hidden");
+        $("review").classList.remove("hidden");
+        renderReview();
       },
       stats(s) {
         $("stats").textContent =
@@ -139,9 +152,77 @@
   $("manual").addEventListener("click", () => pipeline.forceCapture());
   $("betweenGo").addEventListener("click", () => $("between").classList.add("hidden"));
 
+  $("betweenRetake").addEventListener("click", () => {
+    $("between").classList.add("hidden");
+    if (lastShot) retakeSlot(lastShot.slot);
+  });
+
+  $("submit").addEventListener("click", async () => {
+    const btn = $("submit");
+    btn.disabled = true;
+    btn.textContent = "Reading the label…";
+    try {
+      renderReport(await pipeline.compliance());
+    } catch (err) {
+      toast(String(err.message || err), 6000);
+      btn.disabled = false;
+      btn.textContent = "Submit for compliance";
+    }
+  });
+
+  // Drop one photograph and go back to the camera to re-shoot that slot. The
+  // camera stream stays open behind the review screen — only analysis is
+  // paused — so this does not restart it or re-prompt for permission.
+  function retakeSlot(slot) {
+    if (!pipeline.retake(slot)) return; // refused mid-upload
+    $("review").classList.add("hidden");
+    $("stage").classList.remove("hidden");
+    renderThumbs();
+  }
+
   pipeline.start().catch((err) => {
     toast(`Camera unavailable: ${err.message}. HTTPS or localhost is required.`, 8000);
   });
+
+  function renderThumbs() {
+    const el = $("thumbs");
+    el.innerHTML = "";
+    for (const item of pipeline.captured) {
+      const img = document.createElement("img");
+      img.src = item.preview;
+      img.title = `${SLOT_LABEL[item.slot] || item.slot} — tap to retake`;
+      img.addEventListener("click", () => retakeSlot(item.slot));
+      el.append(img);
+    }
+  }
+
+  function renderReview() {
+    const grid = $("reviewGrid");
+    grid.innerHTML = "";
+    for (const item of pipeline.captured) {
+      const label = SLOT_LABEL[item.slot] || item.slot;
+
+      const img = document.createElement("img");
+      img.src = item.preview;
+      img.alt = label;
+
+      const cap = document.createElement("figcaption");
+      cap.textContent = label;
+
+      const btn = document.createElement("button");
+      btn.className = "ghost";
+      btn.textContent = "Retake";
+      btn.addEventListener("click", () => retakeSlot(item.slot));
+
+      const card = document.createElement("figure");
+      card.className = "shot";
+      card.append(img, cap, btn);
+      grid.append(card);
+    }
+    $("reviewSub").textContent =
+      `${pipeline.captured.length} photographs. Check each one is sharp and ` +
+      `shows the whole pack before submitting — the report is only as good as these.`;
+  }
 
   function renderRail(steps, activeIndex) {
     $("rail").innerHTML = "";
@@ -155,6 +236,7 @@
 
   function renderReport(report) {
     $("between").classList.add("hidden");
+    $("review").classList.add("hidden");
     $("stage").classList.add("hidden");
     $("report").classList.remove("hidden");
     pipeline.stop();

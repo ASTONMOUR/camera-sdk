@@ -10,7 +10,7 @@ import { detectFrame, toWorkingGrey } from "./detect.js";
 import { assessQuality } from "./quality.js";
 import { guidanceFor, arrowFor } from "./guidance.js";
 import { createAutomaton, STATE } from "./automaton.js";
-import { buildPlan, surfacesForShape } from "./plan.js";
+import { buildPlan, surfacesForShape, nextMissingSlotIndex } from "./plan.js";
 import { GUIDE, BORDER, STABLE_FRAMES } from "./constants.js";
 
 let checks = 0;
@@ -226,6 +226,38 @@ check("client and server plans agree on slot counts", () => {
 check("cylindrical slots are unique", () => {
   const steps = buildPlan("cylindrical").steps;
   assert.equal(new Set(steps).size, steps.length, "duplicate slots overwrite each other");
+});
+
+console.log("capture cursor");
+
+check("the cursor walks forward while nothing is missing", () => {
+  const steps = buildPlan("cylindrical").steps;
+  const shot = [];
+  for (let i = 0; i < steps.length; i += 1) {
+    assert.equal(nextMissingSlotIndex(steps, shot), i);
+    shot.push({ slot: steps[i] });
+  }
+  assert.equal(nextMissingSlotIndex(steps, shot), -1, "all captured means done");
+});
+
+check("a retake sends the cursor back to that slot, not past it", () => {
+  const steps = buildPlan("cylindrical").steps;
+  const shot = steps.map((slot) => ({ slot }));
+
+  // Drop the first surface, as retake("front") does.
+  const after = shot.filter((c) => c.slot !== "front");
+  assert.equal(nextMissingSlotIndex(steps, after), 0);
+
+  // Re-shooting it must finish the session, NOT resume at side_1 and
+  // re-capture the four surfaces that already have photographs.
+  after.push({ slot: "front" });
+  assert.equal(nextMissingSlotIndex(steps, after), -1);
+});
+
+check("a retake in the middle does not disturb the slots around it", () => {
+  const steps = buildPlan("cylindrical").steps;
+  const after = steps.filter((s) => s !== "back").map((slot) => ({ slot }));
+  assert.equal(nextMissingSlotIndex(steps, after), steps.indexOf("back"));
 });
 
 console.log(`\n${checks} checks passed`);

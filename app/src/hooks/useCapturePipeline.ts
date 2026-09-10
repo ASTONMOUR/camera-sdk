@@ -22,7 +22,10 @@ export interface CaptureState {
   analysis: Analysis | null;
   stats: Stats | null;
   captured: CapturedSlot[];
+  lastShot: CapturedSlot | null;
   between: string | null;
+  complete: boolean;
+  submitting: boolean;
   report: ComplianceReport | null;
   error: string | null;
   backend: string | null;
@@ -49,7 +52,10 @@ export function useCapturePipeline(shape: PackShape) {
     analysis: null,
     stats: null,
     captured: [],
+    lastShot: null,
     between: null,
+    complete: false,
+    submitting: false,
     report: null,
     error: null,
     backend: null,
@@ -75,19 +81,21 @@ export function useCapturePipeline(shape: PackShape) {
         session: (res) => patch({ plan: res.plan, backend: res.ocr_backend, ready: true }),
         step: (slot) => patch({ step: slot }),
         captured: (item) =>
-          setState((prev) => ({ ...prev, captured: [...prev.captured, item] })),
+          // Replace on retake, matching the pipeline's own list — appending
+          // would leave the stale photo in the review grid.
+          setState((prev) => {
+            const at = prev.captured.findIndex((c) => c.slot === item.slot);
+            const captured = at >= 0
+              ? prev.captured.map((c, i) => (i === at ? item : c))
+              : [...prev.captured, item];
+            return { ...prev, captured, lastShot: item };
+          }),
         between: (text) => patch({ between: text }),
         stats: (s) => patch({ stats: s }),
         error: (err) => patch({ error: String(err?.message ?? err) }),
-        complete: async () => {
-          patch({ between: "Reading the label and checking it against the rules…" });
-          try {
-            const report = await pipeline.compliance();
-            if (!cancelled) patch({ report, between: null });
-          } catch (err) {
-            if (!cancelled) patch({ error: String((err as Error)?.message ?? err) });
-          }
-        },
+        // Not `await pipeline.compliance()`. The photographs are what the
+        // report is derived from, so a human confirms them first.
+        complete: () => patch({ complete: true, between: null }),
       },
     });
 
@@ -113,10 +121,49 @@ export function useCapturePipeline(shape: PackShape) {
   const flip = useCallback(() => void pipelineRef.current?.flip(), []);
   const forceCapture = useCallback(() => void pipelineRef.current?.forceCapture(), []);
 
+  // Drop one photograph and go back to the camera for that slot. Clears
+  // `complete` so the review screen yields to the viewport; the pipeline picks
+  // the retaken slot back up as the next missing one and resumes analysis.
   const retake = useCallback((slot: Slot) => {
-    pipelineRef.current?.retake(slot);
-    setState((prev) => ({ ...prev, captured: prev.captured.filter((c) => c.slot !== slot) }));
+    // Refused mid-upload — leave the mirrored state alone or it drifts from the
+    // pipeline's own list.
+    if (!pipelineRef.current?.retake(slot)) return;
+    setState((prev) => ({
+      ...prev,
+      captured: prev.captured.filter((c) => c.slot !== slot),
+      complete: false,
+      between: null,
+    }));
   }, []);
 
-  return { videoRef, canvasRef, state, dismissBetween, flip, forceCapture, retake };
+  const submit = useCallback(async () => {
+    const pipeline = pipelineRef.current;
+    if (!pipeline) return;
+    setState((prev) => ({ ...prev, submitting: true, error: null }));
+    try {
+      const report = await pipeline.compliance();
+      // The session is over once the report exists. Nothing stops the camera
+      // otherwise — the page stays mounted, so the effect cleanup never runs
+      // and the stream would stay live behind the report.
+      await pipeline.stop();
+      setState((prev) => ({ ...prev, report, submitting: false }));
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        submitting: false,
+        error: String((err as Error)?.message ?? err),
+      }));
+    }
+  }, []);
+
+  return {
+    videoRef,
+    canvasRef,
+    state,
+    dismissBetween,
+    flip,
+    forceCapture,
+    retake,
+    submit,
+  };
 }

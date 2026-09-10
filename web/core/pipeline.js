@@ -10,7 +10,7 @@
 import { createCamera } from "./camera.js";
 import { createAutomaton, STATE } from "./automaton.js";
 import { createOverlay } from "./overlay.js";
-import { buildPlan } from "./plan.js";
+import { buildPlan, nextMissingSlotIndex } from "./plan.js";
 import { SERVER } from "./constants.js";
 
 const WORK_WIDTH = 320; // must match detect.js — box coords come back in this space
@@ -71,6 +71,9 @@ export function createPipeline({ video, canvas, shape, apiBase = SERVER.origin, 
 
   function sizeCanvas() {
     const rect = canvas.getBoundingClientRect();
+    // A hidden stage measures 0x0. Sizing to that would blank the overlay and
+    // leave it blank, because un-hiding fires no resize event to correct it.
+    if (rect.width < 1 || rect.height < 1) return;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.round(rect.width * dpr);
     canvas.height = Math.round(rect.height * dpr);
@@ -127,20 +130,36 @@ export function createPipeline({ video, canvas, shape, apiBase = SERVER.origin, 
         quality: lastAnalysis.quality,
       };
       const stored = await api("POST", "/api/capture", body);
-      captured.push({ slot, ...stored, preview: dataUrl });
-      emit("captured", captured[captured.length - 1]);
 
-      stepIndex += 1;
+      // Replace, don't append: a retake re-shoots a slot that is already in the
+      // list, and two entries for one slot would show the stale photo in the
+      // review grid and double-count the progress rail.
+      const item = { slot, ...stored, preview: dataUrl };
+      const at = captured.findIndex((c) => c.slot === slot);
+      if (at >= 0) captured[at] = item;
+      else captured.push(item);
+      emit("captured", item);
+
       // Motion is measured against the previous frame; after a deliberate move to
       // the next surface that reference is meaningless, so clear it.
       worker.postMessage({ type: "reset" });
 
-      const done = stepIndex >= plan.steps.length;
+      // The cursor is derived from what has actually been captured, not bumped
+      // by one. Retake sets it backwards, and a linear ++ would then march
+      // forward re-shooting slots that are already done.
+      const next = nextMissingIndex();
+      const done = next < 0;
+      if (!done) stepIndex = next;
+
       automaton.finish({ done });
       if (done) {
-        emit("complete", captured);
+        // Stop analysing while the review screen is up. retake() resumes.
+        pause();
+        emit("complete", captured.slice());
       } else {
         emit("step", currentStep());
+        // between[i - 1] is the instruction for arriving at steps[i], which
+        // stays correct when the cursor jumps rather than increments.
         emit("between", plan.between[stepIndex - 1] || "");
       }
     } catch (err) {
@@ -180,6 +199,11 @@ export function createPipeline({ video, canvas, shape, apiBase = SERVER.origin, 
     return plan.steps[Math.min(stepIndex, plan.steps.length - 1)];
   }
 
+  // Index of the first slot with no photo, or -1 when every slot is captured.
+  function nextMissingIndex() {
+    return nextMissingSlotIndex(plan.steps, captured);
+  }
+
   function stats() {
     const sorted = [...latency].sort((a, b) => a - b);
     return {
@@ -198,14 +222,19 @@ export function createPipeline({ video, canvas, shape, apiBase = SERVER.origin, 
   }
 
   function retake(slot) {
+    // Mid-upload the captured list is about to be written by takeStill; letting
+    // a retake interleave would drop the entry that upload is still adding.
+    if (uploading) return false;
     const index = plan.steps.indexOf(slot);
-    if (index < 0) return;
+    if (index < 0) return false;
     stepIndex = index;
     const at = captured.findIndex((c) => c.slot === slot);
     if (at >= 0) captured.splice(at, 1);
     automaton.reset();
+    resume();
     worker.postMessage({ type: "reset" });
     emit("step", currentStep());
+    return true;
   }
 
   async function stop() {
@@ -215,9 +244,26 @@ export function createPipeline({ video, canvas, shape, apiBase = SERVER.origin, 
     await camera.stop();
   }
 
+  // Halt analysis without touching the stream. The review screen can sit open
+  // for a while, and detecting at 25fps behind it is pure battery drain — but
+  // dropping the stream would re-prompt for camera permission on resume.
+  function pause() {
+    running = false;
+  }
+
+  function resume() {
+    if (running) return;
+    running = true;
+    busy = false;
+    worker.postMessage({ type: "reset" });
+    requestAnimationFrame(tick);
+  }
+
   return {
     start,
     stop,
+    pause,
+    resume,
     compliance,
     forceCapture,
     retake,
